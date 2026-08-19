@@ -16,6 +16,29 @@
 
 ---
 
+## 🤖 Panduan Mendapatkan Telegram Bot Token & Group ID
+
+Server Topup memerlukan 2 Bot Telegram:
+
+| Variabel `.env` | Nama Bot | Fungsi |
+|---|---|---|
+| `TELEGRAM_BOT_1_TOKEN` & `TELEGRAM_GROUP_1_ID` | **GoPay Bot** | Menangkap pesan SMS mutasi uang masuk dari aplikasi *SMS Forwarder* di HP toko. |
+| `TELEGRAM_BOT_2_TOKEN` & `TELEGRAM_GROUP_2_ID` | **Report Bot** | Jalur bus terenkripsi antar-server (order baru, OTP saldo, Serial Number). |
+
+### 1. Cara Membuat Bot & Mendapatkan `Bot Token`:
+1. Buka aplikasi Telegram, cari bot resmi **`@BotFather`**.
+2. Kirim perintah `/newbot`.
+3. Masukkan nama bot (contoh: `Aruteru Topup Engine`) dan username bot (contoh: `aruteru_topup_bot`).
+4. `@BotFather` akan memberikan **Bot Token** (contoh: `7123456789:AAF_AbCdEfGhIjKlMnOpQrStUvWxYz12345`).
+
+### 2. Cara Membuat Grup & Mendapatkan `Group Chat ID`:
+1. Buat **Grup Baru** di Telegram dan undang bot Anda ke dalam grup tersebut.
+2. Jadikan bot sebagai **Admin Grup**.
+3. Masukkan bot pembantu **`@raw_data_bot`** ke grup, lalu catat ID grup yang muncul pada field `"chat": { "id": -100xxxxxxxxxx }`.
+4. Masukkan ID tersebut (lengkap dengan tanda minus `-100`) ke file `.env`.
+
+---
+
 ## 🏛️ Arsitektur Alur Pemenuhan Pesanan
 
 ```
@@ -70,11 +93,11 @@ Sesuaikan parameter `.env`:
 DATABASE_URL=mysql://db_user:db_password@localhost:3306/db_fulfillment_topup
 
 # Telegram Bots Configuration
-TELEGRAM_BOT_1_TOKEN=your_gopay_bot_token
-TELEGRAM_GROUP_1_ID=-100111111111
+TELEGRAM_BOT_1_TOKEN=7123456789:AAF_TokenBot1_Gopay
+TELEGRAM_GROUP_1_ID=-1001111111111
 
-TELEGRAM_BOT_2_TOKEN=your_report_bot_token
-TELEGRAM_GROUP_2_ID=-100222222222
+TELEGRAM_BOT_2_TOKEN=7123456789:AAF_TokenBot2_Report
+TELEGRAM_GROUP_2_ID=-1002222222222
 
 TELEGRAM_ENCRYPTION_KEY=ARUTERU_SECRET_KEY_SUPER_SECURE_2026
 

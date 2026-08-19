@@ -59,8 +59,8 @@ pub async fn init_telegram_sender() -> Result<(), String> {
 }
 
 async fn start_telegram_batch_worker(mut rx: mpsc::UnboundedReceiver<String>) {
-    tracing::info!("[TELEGRAM BATCH SENDER] Starting 5-second queue worker...");
-    let mut interval = tokio::time::interval(Duration::from_secs(5));
+    tracing::info!("[TELEGRAM BATCH SENDER] Starting 6-second queue worker (max 10 cycles/min for Telegram limit safety)...");
+    let mut interval = tokio::time::interval(Duration::from_secs(6));
     let http_client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .build()

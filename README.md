@@ -16,19 +16,26 @@
 
 ---
 
-## 🤖 Panduan Konfigurasi Telegram (Direct Admin Chat — Tanpa Grup)
+## 🤖 Panduan Mendapatkan Telegram Bot Token & Group ID
 
-Server Topup mendengarkan perintah pemrosesan via **Direct Admin Chat**:
+Server Topup memerlukan 2 Bot Telegram:
 
-1. **Buat Bot di Telegram**:
-   - Buka Telegram, cari **`@BotFather`** $\to$ ketik `/newbot`.
-   - Masukkan nama bot dan username (contoh: `aruteru_topup_bot`).
-   - Salin **Bot Token** yang diberikan (contoh: `7123456789:AAF_TokenBotAnda`).
+| Variabel `.env` | Nama Bot | Fungsi |
+|---|---|---|
+| `TELEGRAM_BOT_1_TOKEN` & `TELEGRAM_GROUP_1_ID` | **GoPay Bot** | Menangkap pesan SMS mutasi uang masuk dari aplikasi *SMS Forwarder* di HP toko. |
+| `TELEGRAM_BOT_2_TOKEN` & `TELEGRAM_GROUP_2_ID` | **Report Bot** | Jalur bus terenkripsi antar-server (order baru, OTP saldo, Serial Number). |
 
-2. **Dapatkan `TELEGRAM_ADMIN_CHAT_ID` (User ID Akun Anda)**:
-   - Buka bot baru Anda di Telegram, lalu klik tombol **/start**.
-   - Buka bot pembantu **`@userinfobot`** $\to$ klik `/start` untuk melihat ID akun Telegram Anda (contoh: `1234567890`).
-   - Masukkan ID tersebut ke file `.env` sebagai `TELEGRAM_ADMIN_CHAT_ID`. Selesai! (Tidak perlu membuat grup).
+### 1. Cara Membuat Bot & Mendapatkan `Bot Token`:
+1. Buka aplikasi Telegram, cari bot resmi **`@BotFather`**.
+2. Kirim perintah `/newbot`.
+3. Masukkan nama bot (contoh: `Aruteru Topup Engine`) dan username bot (contoh: `aruteru_topup_bot`).
+4. `@BotFather` akan memberikan **Bot Token** (contoh: `7123456789:AAF_AbCdEfGhIjKlMnOpQrStUvWxYz12345`).
+
+### 2. Cara Membuat Grup & Mendapatkan `Group Chat ID`:
+1. Buat **Grup Baru** di Telegram dan undang bot Anda ke dalam grup tersebut.
+2. Jadikan bot sebagai **Admin Grup**.
+3. Masukkan bot pembantu **`@raw_data_bot`** ke grup, lalu catat ID grup yang muncul pada field `"chat": { "id": -100xxxxxxxxxx }`.
+4. Masukkan ID tersebut (lengkap dengan tanda minus `-100`) ke file `.env`.
 
 ---
 

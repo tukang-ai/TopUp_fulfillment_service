@@ -1,128 +1,102 @@
-# ⚡ TopUp Fulfillment Service (Server Topup & Bot)
+# ⚡ Fulfillment Service (Server Topup)
 
-[![Rust](https://img.shields.io/badge/Rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
-[![Engine: Tokio](https://img.shields.io/badge/Engine-Tokio_Async-blueviolet.svg)](https://tokio.rs/)
+[![Rust](https://img.shields.io/badge/Rust-1.85%2B-orange.svg)](https://www.rust-lang.org/)
+[![Zero-Inbound](https://img.shields.io/badge/Ports-Zero--Inbound-success.svg)]()
 
-**TopUp Fulfillment Service** adalah server eksekusi pemrosesan pesanan otomatis (*Headless Fulfillment Engine*) berbasis Rust dan Tokio. Server ini bertindak sebagai **Server Topup** yang menjalankan bot Telegram, menangani notifikasi mutasi GoPay, mengeksekusi pesanan topup ke API supplier DigiFlazz, melakukan pengecekan status background poller secara berkala, dan mengembalikan Serial Number (SN) atau refund ke Server Web.
+**Fulfillment Service** adalah otak eksekusi platform topup: **sumber kebenaran harga, voucher, promo, level user, dan saldo**. Service ini TIDAK membuka port HTTP apa pun — seluruh komunikasi masuk/keluar melalui antrean Telegram terenkripsi (HMAC-SHA256 + anti-replay 120 detik) dengan database MySQL miliknya sendiri yang terpisah total dari Server Web.
 
----
-
-## 🔒 Fitur Keamanan Utama (Zero-Inbound Port)
-
-- **Zero-Inbound Port**: Server ini sama sekali **tidak membuka port HTTP publik (0 open ports)**. Seluruh perintah diterima secara *outbound polling* melalui Telegram Bot API.
-- **End-to-End Encryption**: Setiap payload yang diterima diverifikasi menggunakan tanda tangan digital **HMAC-SHA256** dan perlindungan **Anti-Replay Attack (toleransi timestamp $\le 120$ detik)**.
-- **Exclusive Atomic Claim Locking**: Menjamin **100% Anti Dobel Topup** dengan mengunci status pesanan di database lokal sebelum memanggil supplier.
+> ⚠️ **Repo ini HANYA Server Topup.** Website publik ada di proyek terpisah — **TopUp Store Gateway** (`rust_backend`). Web tidak dipercaya untuk menentukan harga.
 
 ---
 
-## 🤖 Panduan Mendapatkan Telegram Bot Token & Group ID
+## 🏛️ Prinsip Utama
 
-Server Topup memerlukan 2 Bot Telegram:
+1. **Otoritas penuh di sini** — setiap order divalidasi ulang: harga dihitung dari DB Topup (base + margin level − flashsale − voucher), bukan nilai kiriman web.
+2. **Two-phase checkout** — web baru boleh membuat tagihan gateway SETELAH server ini mengirim `[ORDER_ACCEPTED]`. Order ditolak → invoice tidak pernah jadi.
+3. **Pengamanan voucher 3 level**
+   - **L1**: dedup per-batch — dari N pesanan identik (user+voucher), hanya yang pertama diproses.
+   - **L2**: validasi penuh — stok atomik (`stock > 0` row-lock), kategori produk, minimum belanja, eksklusif flashsale.
+   - **L3**: anti-replay — voucher yang masih tertaut transaksi aktif/sukses lain otomatis kehilangan diskon.
+4. **Idempoten penuh** — pesan duplikat/replay tidak akan mengeksekusi topup dua kali (atomic claim + dedup per-order).
 
-| Variabel `.env` | Nama Bot | Fungsi |
+---
+
+## 🤖 Bot Telegram & Pembagian Kuota
+
+| Variabel | Arah | Fungsi |
 |---|---|---|
-| `TELEGRAM_BOT_1_TOKEN` & `TELEGRAM_GROUP_1_ID` | **GoPay Bot** | Menangkap pesan SMS mutasi uang masuk dari aplikasi *SMS Forwarder* di HP toko. |
-| `TELEGRAM_BOT_2_TOKEN` & `TELEGRAM_GROUP_2_ID` | **Report Bot** | Jalur bus terenkripsi antar-server (order baru, OTP saldo, Serial Number). |
+| `TELEGRAM_BOT_2_TOKEN` | masuk | Listener perintah `[NEW_ORDER]`, `[REQ_OTP]`, `[VERIFY]`, `[API_ORDER]`, `[REPORT]` |
+| `TELEGRAM_BOT_1_TOKEN` | masuk | Listener mutasi GoPay |
+| `TELEGRAM_BOT_3_TOKEN` | keluar | Sinkronisasi harga/promo/voucher/level ke web (Bot 3) |
+| `TELEGRAM_BOT_SENDER_TOKEN` + `TELEGRAM_BOT_4_TOKEN` | keluar | Pengirim antrean batch round-robin (2×20 = 40 call/menit → siklus 5 detik aman) |
 
-### 1. Cara Membuat Bot & Mendapatkan `Bot Token`:
-1. Buka aplikasi Telegram, cari bot resmi **`@BotFather`**.
-2. Kirim perintah `/newbot`.
-3. Masukkan nama bot (contoh: `Aruteru Topup Engine`) dan username bot (contoh: `aruteru_topup_bot`).
-4. `@BotFather` akan memberikan **Bot Token** (contoh: `7123456789:AAF_AbCdEfGhIjKlMnOpQrStUvWxYz12345`).
+Semua bot admin di grup yang sama; tanpa anggota manusia. `TELEGRAM_ENCRYPTION_KEY` **wajib identik** dengan Server Web. Token listener ini **wajib berbeda** dengan token listener web (getUpdates 409).
 
-### 2. Cara Membuat Grup & Mendapatkan `Group Chat ID`:
-1. Buat **Grup Baru** di Telegram dan undang bot Anda ke dalam grup tersebut.
-2. Jadikan bot sebagai **Admin Grup**.
-3. Masukkan bot pembantu **`@raw_data_bot`** ke grup, lalu catat ID grup yang muncul pada field `"chat": { "id": -100xxxxxxxxxx }`.
-4. Masukkan ID tersebut (lengkap dengan tanda minus `-100`) ke file `.env`.
-
----
-
-## 🏛️ Arsitektur Alur Pemenuhan Pesanan
+## 📨 Kontrak Perintah Utama
 
 ```
-                                  ┌───────────────────────────┐
-                                  │   SERVER WEB (STORE)      │
-                                  └─────────────┬─────────────┘
-                                                │ Telegram Encrypted Bus
-                                                ▼
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                        TOPUP FULFILLMENT SERVICE (SERVER TOPUP)                        │
-│                                                                                        │
-│  1. Report Bot Listener:                                                               │
-│     - Menerima [NEW_ORDER], [REQ_OTP], [VERIFY], [REPORT].                             │
-│     - Memverifikasi Signature HMAC-SHA256 & Anti-Replay Guard.                         │
-│  2. GoPay Bot Listener:                                                                │
-│     - Membaca mutasi SMS GoPay via awalan kata "rp" (anti false-positive).             │
-│     - Pencocokan FIFO (ORDER BY id ASC) untuk nominal yang sesuai.                     │
-│  3. Atomic Claim Guard (Anti Double Topup):                                            │
-│     - Mengunci status pesanan (unpaid -> processing) secara atomik di DB Topup lokal.  │
-│  4. Supplier Execution Engine (DigiFlazz API):                                         │
-│     - Sukses Instan -> Kirim [STATUS_UPDATE] order_id success <SN> ke Server Web.      │
-│     - Pending -> Diserahkan ke Status Poller (30s).                                    │
-│     - Gagal -> Kirim [REFUND_USER] ke Server Web (khusus pembayaran Saldo).            │
-│  5. Background Cron Workers:                                                           │
-│     - Status Poller (30 detik): Mengecek pesanan pending via commands "status".        │
-│     - Tokopay Reconciler (60 detik): Menangkap deposit & order Tokopay unpaid.         │
-│     - Expired Cleaner (60 detik): Meng-cancel order kadaluwarsa > 15 menit.             │
-└────────────────────────────────────────────────────────────────────────────────────────┘
+[NEW_ORDER]      oid user code target provider price nama voucher   → validasi + ACC/tolak
+[REQ_OTP]        oid username code target total voucher               → pembayaran saldo
+[VERIFY]         oid username otp                                     → verifikasi OTP saldo
+[API_ORDER]      oid user code target provider price nama -           → order API reseller (saldo)
+[REPORT]         oid                                                  → konfirmasi lunas gateway
+Keluar: [ORDER_ACCEPTED] [ORDER_REJECTED] [STATUS_UPDATE] [REFUND_USER]
+        [SYNC_PRICE] [SYNC_FLASH] [SYNC_VOUCHER] [SYNC_USER]
 ```
 
 ---
 
-## ⚙️ Prasyarat Sistem
+## ⚙️ Prasyarat
 
-- **Rust Toolchain**: `rustc` & `cargo` versi 1.75 atau lebih baru.
-- **Database**: MySQL 8.0+ atau MariaDB 10.5+ (Lokal untuk Server Topup).
-- **Akun Telegram Bot**: Bot Token dari `@BotFather` & Group Chat ID Telegram.
+- Rust toolchain 1.85+
+- MySQL 8.0+ / MariaDB 10.5+ (**database Topup terpisah** — bukan database web)
 
----
+## 🚀 Konfigurasi & Menjalankan
 
-## 🚀 Panduan Konfigurasi & Menjalankan Server
-
-### 1. Konfigurasi Environment (`.env`)
-Salin file `.env.example` menjadi `.env`:
 ```bash
-cp .env.example .env
+cp .env.example .env   # lalu sesuaikan
 ```
 
-Sesuaikan parameter `.env`:
 ```env
-# Database Topup Lokal (MySQL)
-DATABASE_URL=mysql://db_user:db_password@localhost:3306/db_fulfillment_topup
+DATABASE_URL=mysql://user:pass@localhost:3306/db_topup
 
-# Telegram Bots Configuration
-TELEGRAM_BOT_1_TOKEN=7123456789:AAF_TokenBot1_Gopay
-TELEGRAM_GROUP_1_ID=-1001111111111
+# Supplier
+DIGIFLAZZ_USERNAME=...
+DIGIFLAZZ_APIKEY=...
 
-TELEGRAM_BOT_2_TOKEN=7123456789:AAF_TokenBot2_Report
-TELEGRAM_GROUP_2_ID=-1002222222222
+# Telegram bus (kunci wajib sama dengan Server Web)
+TELEGRAM_ENCRYPTION_KEY=kunci-rahasia-sama-dengan-server-web
+TELEGRAM_BOT_1_TOKEN=...
+TELEGRAM_BOT_2_TOKEN=...
+TELEGRAM_BOT_3_TOKEN=...
+TELEGRAM_GROUP_1_ID=-100xxxxxxxxxx
+TELEGRAM_GROUP_2_ID=-100xxxxxxxxxx
 
-TELEGRAM_ENCRYPTION_KEY=ARUTERU_SECRET_KEY_SUPER_SECURE_2026
-
-# Kredensial Supplier DigiFlazz
-DIGIFLAZZ_USERNAME=your_digi_username
-DIGIFLAZZ_APIKEY=your_digi_production_apikey
-
-# WhatsApp Gateway untuk OTP Transaksi (OpenWA / MPWA)
-WA_GATEWAY_URL=http://127.0.0.1:3000/api/v1/send-message
-MPWA_API_KEY=your_wa_token
-MPWA_SENDER_PHONE=default
+# Sinkronisasi katalog ke web (detik)
+SYNC_INTERVAL_SECONDS=300
 ```
 
-### 2. Menjalankan Server
 ```bash
-# Mode Development
-cargo run --bin fulfillment_service
-
-# Mode Produksi (Optimasi Penuh)
+# Worker utama (zero-inbound)
 cargo run --bin fulfillment_service --release
+
+# Dashboard terminal interaktif
+cargo run --bin fulfillment_cli
 ```
 
-Server Topup akan langsung aktif, memantau antrean bot Telegram, dan menjalankan worker cron di latar belakang.
+### 🖥️ fulfillment_cli — Kontrol Panel Terminal
 
----
+Menu interaktif langsung ke DB Topup:
+1. **Dashboard** — statistik harian, revenue, grafik order 7 hari
+2. **Kelola Layanan** — ubah harga, margin member/reseller, status
+3. **Kelola Flashsale** — tambah/aktifkan/matikan/hapus
+4. **Kelola Voucher** — kode, kategori, diskon, minimum, stok
+5. **Transaksi Terbaru**
+6. **User & Saldo**
+7. **🔄 Sync ke Server Web** — dorong snapshot katalog+promo via Bot 3
+
+Setelah mengubah harga/promo lewat CLI, jalankan menu **[7]** agar web langsung selaras (atau tunggu sync periodik).
 
 ## 📄 Lisensi
-Proyek ini dilindungi di bawah lisensi **GNU AGPLv3 (Affero General Public License v3.0)**.
+
+Proyek ini dilindungi di bawah lisensi **GNU AGPLv3**.
